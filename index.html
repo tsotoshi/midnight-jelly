@@ -125,7 +125,7 @@ button:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
   flex-direction: column;
   justify-content: space-between;
   padding: 15cqw 6cqw 7cqw;
-  background: linear-gradient(var(--scrim), var(--clear) 36%, var(--clear) 50%, var(--scrim) 72%);
+  background: linear-gradient(var(--scrim), var(--clear) 30%, var(--clear) 40%, var(--scrim) 60%);
 }
 .overlay.dim { background: var(--scrim); justify-content: center; gap: 6cqw; }
 h1 {
@@ -158,6 +158,20 @@ h1 {
   cursor: pointer;
 }
 #go:hover { filter: brightness(1.1); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#alt {
+  font: inherit;
+  font-weight: 600;
+  font-size: clamp(14px, 4.4cqw, 18px);
+  min-height: 44px;
+  padding: 0 16px;
+  color: var(--glow);
+  background: var(--panel);
+  border: 1px solid var(--glow);
+  border-radius: 4px;
+  cursor: pointer;
+}
+#alt:hover { filter: brightness(1.15); }
 @media (prefers-reduced-motion: reduce) {
   .toast.show { animation: none; opacity: 1; }
 }
@@ -181,9 +195,12 @@ h1 {
     <section class="overlay" id="overlay">
       <h1 id="ovTitle">Midnight Jelly</h1>
       <div class="lower">
-        <p id="ovText">Tap, click or press Space to pulse. Stop pulsing and you sink. Slip between the basalt stacks and stay off the seabed.</p>
+        <p id="ovText">Tap, click or press Space to pulse. Stop pulsing and you sink. Slip between the basalt stacks and stay off the seabed. Riptide starts faster and keeps speeding up.</p>
         <p id="ovStat" aria-live="polite"></p>
-        <button id="go" type="button">Start dive</button>
+        <div class="actions">
+          <button id="go" type="button">Start dive</button>
+          <button id="alt" type="button">Riptide dive</button>
+        </div>
       </div>
     </section>
   </main>
@@ -205,11 +222,16 @@ h1 {
   ];
   const NOTES = [392, 440, 523, 587, 659, 784, 880];
   const WORM = [255, 95, 126];
+  const DIFFS = {
+    normal:  { key: 'midnight-jelly-best',         tag: '',         base: 135, ramp: 1.4, max: 180, gap: 178, gapRamp: 1.6, gapMin: 136, swayAt: 12, shift: 140 },
+    riptide: { key: 'midnight-jelly-best-riptide', tag: 'Riptide ', base: 170, ramp: 5,   max: 320, gap: 172, gapRamp: 1.2, gapMin: 142, swayAt: 20, shift: 110 },
+  };
+  let diff = 'normal';
 
   const $ = id => document.getElementById(id);
   const wrap = $('wrap'), stage = $('stage'), canvas = $('c'), ctx = canvas.getContext('2d');
   const overlay = $('overlay'), ovTitle = $('ovTitle'), ovText = $('ovText'), ovStat = $('ovStat');
-  const go = $('go'), soundBtn = $('sound'), pauseBtn = $('pause');
+  const go = $('go'), alt = $('alt'), soundBtn = $('sound'), pauseBtn = $('pause');
   const readout = $('readout'), depthEl = $('depth'), zoneEl = $('zone'), toast = $('toast');
 
   const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -226,7 +248,10 @@ h1 {
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* the game works without saving */ } },
   };
 
-  let best = parseInt(store.get('midnight-jelly-best'), 10) || 0;
+  const bests = {
+    normal: parseInt(store.get(DIFFS.normal.key), 10) || 0,
+    riptide: parseInt(store.get(DIFFS.riptide.key), 10) || 0,
+  };
   let muted = store.get('midnight-jelly-muted') === '1';
 
   let mode = 'attract';     // attract | play | paused | over
@@ -274,13 +299,15 @@ h1 {
     p.closePath();
     return p;
   }
-  const gapSize = () => Math.max(178 - score * 1.6, 136);
-  const speedNow = () => Math.min(135 + score * 1.4, 180);
+  const gapSize = () => Math.max(DIFFS[diff].gap - score * DIFFS[diff].gapRamp, DIFFS[diff].gapMin);
+  const speedNow = () => Math.min(DIFFS[diff].base + score * DIFFS[diff].ramp, DIFFS[diff].max);
   function addStack(x) {
     const margin = 125;
     const prev = stacks.length ? stacks[stacks.length - 1].cy : H * 0.45;
-    const cy = clamp(prev + rand(-140, 140), margin, FLOOR - margin);
-    const amp = mode === 'play' && score >= 12 ? Math.min(6 + (score - 12) * 1.2, 26) : 0;
+    const shift = DIFFS[diff].shift;
+    const cy = clamp(prev + rand(-shift, shift), margin, FLOOR - margin);
+    const swayAt = DIFFS[diff].swayAt;
+    const amp = mode === 'play' && score >= swayAt ? Math.min(6 + (score - swayAt) * 1.2, 26) : 0;
     stacks.push({ x, cy, amp, phase: rand(0, 6.28), gap: gapSize(), passed: false, up: columnPath(), down: columnPath() });
   }
   const centerOf = s => s.cy + Math.sin(time * 1.1 + s.phase) * s.amp;
@@ -301,7 +328,7 @@ h1 {
   function setReadout() {
     const m = depthOf(score);
     depthEl.textContent = fmt(m);
-    zoneEl.textContent = ZONES[zoneIndex(m)].name;
+    zoneEl.textContent = DIFFS[diff].tag + ZONES[zoneIndex(m)].name;
   }
   function showOverlay(title, text, stat, label, dim) {
     ovTitle.textContent = title;
@@ -309,9 +336,12 @@ h1 {
     ovStat.textContent = stat;
     go.textContent = label;
     overlay.classList.toggle('dim', dim);
+    alt.hidden = mode === 'paused';
+    alt.textContent = diff === 'riptide' ? 'Normal dive' : 'Riptide dive';
     overlay.hidden = false;
   }
-  function start() {
+  function start(next = diff) {
+    diff = next;
     mode = 'play';
     score = 0; zone = 0; dist = 0; shake = 0;
     y = H * 0.42; vy = 0;
@@ -335,8 +365,9 @@ h1 {
       motes.push({ x: JELLY_X, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(.5, 1.2), c: col.jelly });
     }
     tone(190, 45, .5, 'triangle', .2);
-    const newBest = score > best;
-    if (newBest) { best = score; store.set('midnight-jelly-best', String(best)); }
+    const d = DIFFS[diff];
+    const newBest = score > bests[diff];
+    if (newBest) { bests[diff] = score; store.set(d.key, String(score)); }
     pauseBtn.hidden = true;
     const m = depthOf(score);
     const passed = score === 1 ? '1 stack passed.' : `${score} stacks passed.`;
@@ -345,7 +376,7 @@ h1 {
       readout.hidden = true;
       showOverlay('Dive over',
         `You reached ${fmt(m)} in the ${ZONES[zoneIndex(m)].name}. ${passed}`,
-        newBest ? 'That is your deepest dive so far.' : `Deepest dive: ${fmt(depthOf(best))}.`,
+        newBest ? `That is your deepest ${d.tag}dive so far.` : `Deepest ${d.tag}dive: ${fmt(depthOf(bests[diff]))}.`,
         'Dive again', true);
     }, 500);
   }
@@ -574,9 +605,11 @@ h1 {
     ridge(H - 150, 34, .011, .027, .22, rgba(mix(col.bot, col.top, .28), .85));
     ridge(H - 88, 26, .017, .041, .45, rgba(mix(col.bot, col.top, .1), .95));
 
+    // Marine snow stretches into streaks as the current picks up.
+    const stretch = mode === 'attract' || mode === 'over' ? 1 : 1 + Math.max(0, speedNow() - 135) / 30;
     for (const f of snow) {
       ctx.fillStyle = `rgba(226,244,244,${f.a})`;
-      ctx.fillRect(f.x, f.y, f.r, f.r);
+      ctx.fillRect(f.x, f.y, f.r * stretch, f.r);
     }
 
     const rockLit = mix(col.jelly, col.bot, .76), rockDark = mix(col.jelly, col.bot, .93);
@@ -638,6 +671,7 @@ h1 {
     if (mode === 'paused') { setPaused(false); stage.focus({ preventScroll: true }); }
     else start();
   });
+  alt.addEventListener('click', () => start(diff === 'riptide' ? 'normal' : 'riptide'));
   pauseBtn.addEventListener('click', () => {
     setPaused(mode === 'play');
     stage.focus({ preventScroll: true });
@@ -666,8 +700,9 @@ h1 {
 
   /* ---------- boot ---------- */
   paintSound();
-  ovStat.textContent = best
-    ? `Deepest dive: ${fmt(depthOf(best))}.`
+  ovStat.textContent = bests.normal || bests.riptide
+    ? [bests.normal && `Deepest dive: ${fmt(depthOf(bests.normal))}.`,
+       bests.riptide && `Deepest Riptide dive: ${fmt(depthOf(bests.riptide))}.`].filter(Boolean).join(' ')
     : 'You start at 200 m. New zones open at 1,000, 4,000 and 6,000 m.';
   // Run the title-screen demo ahead so the first frame already shows the trench.
   for (let i = 0; i < 480; i++) step(STEP * 2);
